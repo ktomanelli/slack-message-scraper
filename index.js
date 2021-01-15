@@ -8,6 +8,7 @@ const token = process.env.SLACK_BOT_TOKEN;
 
 const bot = new Slack({ token });
 
+// gets single reply page
 const getReplyPage = async (channel, cursor, ts) => {
   const replyArr = [];
   const res = await bot.conversations.replies({
@@ -32,6 +33,7 @@ const getReplyPage = async (channel, cursor, ts) => {
   return { replyArr, replyHasMore: res.has_more };
 };
 
+// gets all replies to specified message
 const getReplies = async (channel, ts) => {
   const replies = [];
   const firstReplyPage = await getReplyPage(channel, '', ts);
@@ -47,6 +49,7 @@ const getReplies = async (channel, ts) => {
   return replies;
 };
 
+// gets single message page + all replies on each message
 const getMessagePage = async (channel, cursor) => {
   const messageArr = [];
   const res = await bot.conversations.history({
@@ -75,6 +78,7 @@ const getMessagePage = async (channel, cursor) => {
   };
 };
 
+// gets all messages
 const getMessages = async channel => {
   const messages = [];
   const firstPage = await getMessagePage(channel, '');
@@ -90,6 +94,8 @@ const getMessages = async channel => {
   return messages;
 };
 
+// gets all channels in workspace *that bot has access to
+// bot needs to be added to private channel for channel to show in this list
 const getChannels = async () => {
   const channels = [];
 
@@ -110,6 +116,8 @@ const getChannels = async () => {
   }
   return channels;
 };
+
+// gets all members in workspace
 const getMembers = async () => {
   const members = [];
   const res = await bot.users.list();
@@ -127,9 +135,9 @@ const getMembers = async () => {
   return members;
 };
 
+// collects member data and channel data, iterates through channels gets all messages for each
 const collectAll = async () => {
   const botInfo = await bot.auth.test();
-
   const data = {};
   const channels = await getChannels();
   const members = await getMembers();
@@ -149,12 +157,12 @@ const collectAll = async () => {
     console.log(`collecting messages from ${channel.name}...`);
     const messages = await getMessages(channel.id);
     channel.messages = messages;
-    // console.log(channel);
     data.channels.push(channel);
   }
   return data;
 };
 
+// collects all data and saves to files
 collectAll()
   .then(data => {
     fs.writeFileSync('./slackData.json', JSON.stringify(data));
