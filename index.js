@@ -11,26 +11,33 @@ const bot = new Slack({ token });
 // gets single reply page
 const getReplyPage = async (channel, cursor, ts) => {
   const replyArr = [];
-  const res = await bot.conversations.replies({
-    token,
-    channel,
-    ts,
-    cursor,
-    inclusive: true,
+  return new Promise((resolve, reject) => {
+    setTimeout(async () => {
+      const res = await bot.conversations.replies({
+        token,
+        channel,
+        ts,
+        cursor,
+        inclusive: true,
+      });
+      for (const reply of res.messages) {
+        if (reply.ts !== ts) {
+          replyArr.push(reply);
+        }
+      }
+      if (res.has_more) {
+        resolve({
+          replyHasMore: res.has_more,
+          replyCursor: res.response_metadata.next_cursor,
+          replyArr,
+        });
+      } else if (!res.has_more) {
+        resolve({ replyArr, replyHasMore: res.has_more });
+      } else {
+        reject();
+      }
+    }, 1000);
   });
-  for (const reply of res.messages) {
-    if (reply.ts !== ts) {
-      replyArr.push(reply);
-    }
-  }
-  if (res.has_more) {
-    return {
-      replyHasMore: res.has_more,
-      replyCursor: res.response_metadata.next_cursor,
-      replyArr,
-    };
-  }
-  return { replyArr, replyHasMore: res.has_more };
 };
 
 // gets all replies to specified message
@@ -52,30 +59,37 @@ const getReplies = async (channel, ts) => {
 // gets single message page + all replies on each message
 const getMessagePage = async (channel, cursor) => {
   const messageArr = [];
-  const res = await bot.conversations.history({
-    token,
-    channel,
-    cursor,
-    inclusive: true,
+  return new Promise((resolve, reject) => {
+    setTimeout(async () => {
+      const res = await bot.conversations.history({
+        token,
+        channel,
+        cursor,
+        inclusive: true,
+      });
+      for (const message of res.messages) {
+        if (message.reply_count) {
+          const replies = await getReplies(channel, message.ts);
+          message.replies = replies;
+        }
+        messageArr.push(message);
+      }
+      if (res.has_more) {
+        resolve({
+          messageArr,
+          has_more: res.has_more,
+          cursor: res.response_metadata.next_cursor,
+        });
+      } else if (!res.has_more) {
+        resolve({
+          messageArr,
+          has_more: res.has_more,
+        });
+      } else {
+        reject();
+      }
+    }, 2000);
   });
-  for (const message of res.messages) {
-    if (message.reply_count) {
-      const replies = await getReplies(channel, message.ts);
-      message.replies = replies;
-    }
-    messageArr.push(message);
-  }
-  if (res.has_more) {
-    return {
-      messageArr,
-      has_more: res.has_more,
-      cursor: res.response_metadata.next_cursor,
-    };
-  }
-  return {
-    messageArr,
-    has_more: res.has_more,
-  };
 };
 
 // gets all messages
@@ -138,34 +152,35 @@ const getMembers = async () => {
 // collects member data and channel data, iterates through channels gets all messages for each
 const collectAll = async () => {
   const botInfo = await bot.auth.test();
-  const data = {};
   const channels = await getChannels();
   const members = await getMembers();
-  data.members = members;
-  data.channels = [];
+  if (!fs.existsSync('./data/members.json')) {
+    console.log('no file, creating now...');
+    fs.writeFileSync(`./data/members.json`, JSON.stringify(members));
+    console.log('created');
+  }
   for (const channel of channels) {
-    if (channel.num_members < 0 || channel.is_group) {
-      const convMemebers = await bot.conversations.members({
-        channel: channel.id,
-      });
-      if (!convMemebers.members.includes(botInfo.user_id)) {
+    if (!fs.existsSync(`./data/${channel.name}.json`)) {
+      if (channel.is_archived) {
+        continue;
+      } else if (channel.num_members < 0 || channel.is_group) {
+        const convMemebers = await bot.conversations.members({
+          channel: channel.id,
+        });
+        if (!convMemebers.members.includes(botInfo.user_id)) {
+          await bot.conversations.join({ channel: channel.id });
+        }
+      } else {
         await bot.conversations.join({ channel: channel.id });
       }
-    } else {
-      await bot.conversations.join({ channel: channel.id });
+      console.log(`collecting messages from ${channel.name}...`);
+      const messages = await getMessages(channel.id);
+      channel.messages = messages;
+      fs.writeFileSync(`./data/${channel.name}.json`, JSON.stringify(channel));
+      console.log('file saved successfully');
     }
-    console.log(`collecting messages from ${channel.name}...`);
-    const messages = await getMessages(channel.id);
-    channel.messages = messages;
-    data.channels.push(channel);
   }
-  return data;
 };
 
 // collects all data and saves to files
-collectAll()
-  .then(data => {
-    fs.writeFileSync('./slackData.json', JSON.stringify(data));
-    console.log('file saved successfully');
-  })
-  .catch(e => console.error(e));
+collectAll().catch(e => console.error(e));
